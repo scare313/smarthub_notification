@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Environment configurations containing secrets
+.env
+
+# Session states and databases
+src/storage/auth.json
+src/storage/oms_alerts.db
+src/storage/oms_alerts.db-journal
+
+# Outputs & temporary folders
+screenshots/
+logs/
+.gemini/

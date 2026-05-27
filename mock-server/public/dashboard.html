@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartHUB OMS - Merchant Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+      --accent-color: #6366f1;
+      --accent-hover: #4f46e5;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --card-bg: rgba(30, 41, 59, 0.45);
+      --card-border: rgba(255, 255, 255, 0.06);
+      
+      --color-meesho: #ff477e;
+      --color-flipkart: #2874f0;
+      --color-amazon: #ff9900;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 40px;
+    }
+
+    .dashboard-container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .brand-section h1 {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-section p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .user-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      border-radius: 99px;
+      color: #10b981;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 10px #10b981;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { opacity: 0.4; }
+    }
+
+    .logout-btn {
+      padding: 8px 16px;
+      background: transparent;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s ease;
+    }
+
+    .logout-btn:hover {
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.2);
+      background: rgba(239, 68, 68, 0.05);
+    }
+
+    /* KPI Summary Cards Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+
+    .kpi-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+    }
+
+    .kpi-card.total::before { background: var(--accent-color); }
+    .kpi-card.meesho::before { background: var(--color-meesho); }
+    .kpi-card.flipkart::before { background: var(--color-flipkart); }
+    .kpi-card.amazon::before { background: var(--color-amazon); }
+
+    .kpi-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    /* Table Component */
+    .table-container {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .table-title {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .orders-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    .orders-table th {
+      padding: 16px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .orders-table td {
+      padding: 16px;
+      font-size: 14px;
+      color: var(--text-main);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .orders-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .orders-table tr:hover td {
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .marketplace-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tag-meesho {
+      background: rgba(255, 71, 126, 0.1);
+      color: var(--color-meesho);
+      border: 1px solid rgba(255, 71, 126, 0.15);
+    }
+
+    .tag-flipkart {
+      background: rgba(40, 116, 240, 0.1);
+      color: var(--color-flipkart);
+      border: 1px solid rgba(40, 116, 240, 0.15);
+    }
+
+    .tag-amazon {
+      background: rgba(255, 153, 0, 0.1);
+      color: var(--color-amazon);
+      border: 1px solid rgba(255, 153, 0, 0.15);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(245, 158, 11, 0.1);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.15);
+    }
+
+    .value-column {
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="dashboard-container">
+    <header>
+      <div class="brand-section">
+        <h1>Merchant Control Center</h1>
+        <p>SmartHUB OMS Unified Marketplace Interface</p>
+      </div>
+
+      <div class="user-actions">
+        <div class="status-badge">
+          <div class="status-dot"></div>
+          Live Sync Active
+        </div>
+        <button class="logout-btn" id="logoutBtn">Logout</button>
+      </div>
+    </header>
+
+    <div class="kpi-grid">
+      <div class="kpi-card total">
+        <span class="kpi-label">Total Pending Shipment</span>
+        <span class="kpi-value" id="kpiTotal">0</span>
+      </div>
+      <div class="kpi-card meesho">
+        <span class="kpi-label">Meesho Orders</span>
+        <span class="kpi-value" id="kpiMeesho">0</span>
+      </div>
+      <div class="kpi-card flipkart">
+        <span class="kpi-label">Flipkart Orders</span>
+        <span class="kpi-value" id="kpiFlipkart">0</span>
+      </div>
+      <div class="kpi-card amazon">
+        <span class="kpi-label">Amazon Orders</span>
+        <span class="kpi-value" id="kpiAmazon">0</span>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <div class="table-header">
+        <h3 class="table-title">Orders Awaiting Dispatch</h3>
+      </div>
+
+      <table class="orders-table" id="ordersTable">
+        <thead>
+          <tr>
+            <th>Order ID</th>
+            <th>Marketplace</th>
+            <th>Customer</th>
+            <th>SKU</th>
+            <th>Order Value</th>
+            <th>Created Time</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody">
+          <!-- Dynamically inserted by JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function loadOrders() {
+      try {
+        const response = await fetch('/api/orders');
+        if (!response.ok) {
+          if (response.status === 401) {
+            window.location.href = '/';
+            return;
+          }
+          throw new Error('API request failed');
+        }
+
+        const data = await response.json();
+        const orders = data.orders || [];
+
+        // Count marketplaces
+        let meesho = 0;
+        let flipkart = 0;
+        let amazon = 0;
+
+        const body = document.getElementById('ordersBody');
+        body.innerHTML = '';
+
+        orders.forEach(order => {
+          if (order.marketplace === 'Meesho') meesho++;
+          else if (order.marketplace === 'Flipkart') flipkart++;
+          else if (order.marketplace === 'Amazon') amazon++;
+
+          const tr = document.createElement('tr');
+          
+          let tagClass = 'tag-meesho';
+          if (order.marketplace === 'Flipkart') tagClass = 'tag-flipkart';
+          else if (order.marketplace === 'Amazon') tagClass = 'tag-amazon';
+
+          const formattedTime = new Date(order.createdTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+          tr.innerHTML = `
+            <td><strong>${order.orderId}</strong></td>
+            <td><span class="marketplace-tag ${tagClass}">${order.marketplace}</span></td>
+            <td>${order.customer}</td>
+            <td><code>${order.sku}</code></td>
+            <td class="value-column">₹${order.orderValue}</td>
+            <td>${formattedTime}</td>
+            <td><span class="status-pill">${order.status}</span></td>
+          `;
+          body.appendChild(tr);
+        });
+
+        document.getElementById('kpiTotal').textContent = orders.length;
+        document.getElementById('kpiMeesho').textContent = meesho;
+        document.getElementById('kpiFlipkart').textContent = flipkart;
+        document.getElementById('kpiAmazon').textContent = amazon;
+
+      } catch (err) {
+        console.error('Error loading dashboard orders:', err);
+      }
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.href = '/';
+    });
+
+    // Initial load
+    loadOrders();
+  </script>
+</body>
+</html>

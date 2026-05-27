@@ -1,0 +1,24 @@
+{
+  "slas": {
+    "Meesho": "11:00",
+    "Flipkart": "12:00",
+    "Amazon": "15:00"
+  },
+  "escalations": {
+    "Meesho": [
+      { "time": "10:00", "level": "warning" },
+      { "time": "10:30", "level": "urgent" },
+      { "time": "10:50", "level": "critical" }
+    ],
+    "Flipkart": [
+      { "time": "11:00", "level": "warning" },
+      { "time": "11:30", "level": "urgent" },
+      { "time": "11:50", "level": "critical" }
+    ],
+    "Amazon": [
+      { "time": "14:00", "level": "warning" },
+      { "time": "14:30", "level": "urgent" },
+      { "time": "14:50", "level": "critical" }
+    ]
+  }
+}

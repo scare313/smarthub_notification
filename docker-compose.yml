@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  oms-alert-system:
+    build: .
+    container_name: oms-alert-system
+    ports:
+      - "3000:3000"
+    environment:
+      - OMS_URL=http://localhost:3000
+      - OMS_USERNAME=admin
+      - OMS_PASSWORD=supersecurepassword
+      - TELEGRAM_BOT_TOKEN=mock_token
+      - TELEGRAM_CHAT_ID=mock_chat_id
+      - CHECK_INTERVAL=15
+      - HEADLESS=true
+    volumes:
+      - ./src/storage:/app/src/storage
+      - ./screenshots:/app/screenshots
+      - ./logs:/app/logs
+    restart: always
