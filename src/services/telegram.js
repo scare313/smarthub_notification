@@ -16,18 +16,26 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
   else if (alertLevel === 'critical') emoji = '🚨';
 
   // Construct message text
-  let messageText = `${emoji} SHIPPING ALERT\n\n`;
-  messageText += `*Marketplace:* ${marketplace}\n\n`;
-  messageText += `*Pending Orders:* ${orders.length}\n\n`;
-  
-  if (remainingMins !== undefined) {
-    messageText += `*Remaining Time:* ${remainingMins} mins\n\n`;
+  let messageText = '';
+  if (orders.length === 1 && orders[0].orderId === 'All Clear') {
+    messageText = `ℹ️ SHIPPING STATUS UPDATE\n\n`;
+    messageText += `*Marketplace:* SmartHUB\n\n`;
+    messageText += `*Status:* All Clear ✅\n\n`;
+    messageText += `No pending pick lists are present or scheduled for today.\n`;
+  } else {
+    messageText = `${emoji} SHIPPING ALERT\n\n`;
+    messageText += `*Marketplace:* ${marketplace}\n\n`;
+    messageText += `*Pending Orders:* ${orders.length}\n\n`;
+    
+    if (remainingMins !== undefined) {
+      messageText += `*Remaining Time:* ${remainingMins} mins\n\n`;
+    }
+    
+    messageText += `*Order IDs:*\n`;
+    orders.forEach(o => {
+      messageText += `\`${o.orderId}\` (${o.sku})\n`;
+    });
   }
-  
-  messageText += `*Order IDs:*\n`;
-  orders.forEach(o => {
-    messageText += `\`${o.orderId}\` (${o.sku})\n`;
-  });
 
   // If token is placeholder or not configured, fall back to mock logger
   const isMock = !token || token === 'YOUR_TELEGRAM_BOT_TOKEN' || token === 'mock_token' || chatIds.length === 0 || chatIds.includes('mock_chat_id');

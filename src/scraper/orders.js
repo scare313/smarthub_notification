@@ -116,9 +116,9 @@ async function extractData(page, interceptor, screenshotPath) {
   console.log(`[Scraper] Today's target date string: "${todayStr}"`);
 
   // 1. Locate and click today's date card
+  let clicked = false;
   try {
     const cards = await page.$$('.awui-pick-create-card');
-    let clicked = false;
 
     for (const card of cards) {
       const text = await card.textContent();
@@ -129,16 +129,24 @@ async function extractData(page, interceptor, screenshotPath) {
         break;
       }
     }
-
-    if (!clicked) {
-      console.log(`[Scraper] Card matching "${todayStr}" not explicitly found. Clicking default selected card.`);
-      const selected = await page.$('.awui-pick-create-card-selected');
-      if (selected) await selected.click();
-    }
-
-    await page.waitForTimeout(3000); // Wait for table to refresh
   } catch (cardErr) {
     console.warn('[Scraper] Warning: Error checking date cards:', cardErr.message);
+  }
+
+  // If today's date card was NOT found on the page, stop, capture screenshot, and return empty list
+  if (!clicked) {
+    console.log(`[Scraper] Card matching "${todayStr}" not explicitly found for today. Skipping click and table wait.`);
+    try {
+      const screenshotsDir = path.dirname(screenshotPath);
+      if (!fs.existsSync(screenshotsDir)) {
+        fs.mkdirSync(screenshotsDir, { recursive: true });
+      }
+      await page.screenshot({ path: screenshotPath });
+      console.log(`Dashboard screenshot successfully captured (No date card today) at: ${screenshotPath}`);
+    } catch (err) {
+      console.error('Failed to capture dashboard screenshot:', err);
+    }
+    return [];
   }
 
   // Priority 1: Network Interceptor data (fallback if background requests are intercepted)
@@ -158,11 +166,19 @@ async function extractData(page, interceptor, screenshotPath) {
   // Priority 2: DOM Scraping Fallback (Scrapes the recommended pick table)
   console.log('Priority 1 Interception did not capture standard data. Scraping recommended pick table...');
   try {
-    // Wait for the recommended pick table to load
-    await page.waitForSelector('#awui-pick-recommended-table table', { timeout: 8000 });
+    // 2. Robust Table Wait: Wait for recommended table to load and become visible
+    console.log('[Scraper] Waiting for recommended table to load and become visible...');
+    await page.waitForSelector('#awui-pick-recommended-table table', { state: 'visible', timeout: 15000 });
     
-    // Wait a brief 2 seconds for full rendering
-    await page.waitForTimeout(2000);
+    // Wait for any background API calls/rendering network to settle
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 4000 });
+    } catch (e) {
+      // Ignore networkidle timeout
+    }
+    
+    // 3. Render Buffer: Wait a solid 3 seconds for DOM rows to fully render visually
+    await page.waitForTimeout(3000);
 
     // Capture the fully loaded pick table screenshot
     try {

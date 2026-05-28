@@ -38,6 +38,44 @@ async function runSingleCycle() {
     const fetchDuration = Date.now() - startTime;
     log('FetchOrders', 'SUCCESS', fetchDuration);
 
+    // If 0 orders are found, check if we should send the "All Clear" daily report
+    if (orders.length === 0) {
+      log('FetchOrders', 'NO_ORDERS_TODAY');
+      
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMin = now.getMinutes();
+      const timeVal = currentHour * 60 + currentMin;
+      const targetTimeVal = 10 * 60 + 45; // 10:45 AM (15 mins before Meesho 11:00 AM SLA)
+
+      if (timeVal >= targetTimeVal) {
+        const dateStr = now.toISOString().split('T')[0];
+        const clearKey = `ClearDay_${dateStr}`;
+        const alreadyNotified = await db.hasBeenNotified(clearKey, 'informational');
+
+        if (!alreadyNotified) {
+          console.log(`[App] 10:45 AM or later reached. Dispatching "All Clear" notification...`);
+          const clearDayAlert = {
+            marketplace: 'SmartHUB',
+            alertLevel: 'informational',
+            orders: [{ orderId: 'All Clear', sku: 'No pending pick lists today' }]
+          };
+          
+          const screenshotPath = path.join(__dirname, '..', 'screenshots', 'dashboard.png');
+          try {
+            await sendTelegramAlert(clearDayAlert, screenshotPath);
+            log('SendTelegramAlert:ClearDay', 'SUCCESS');
+          } catch (alertErr) {
+            log('SendTelegramAlert:ClearDay', 'FAILED', null, alertErr);
+          }
+        }
+      }
+      
+      const totalDuration = Date.now() - startTime;
+      log('FetchOrdersCycle', 'SUCCESS', totalDuration);
+      return Infinity; // Return Infinity since no deadlines are active
+    }
+
     // 2. Process orders through Rules Engine & filter notifications
     const { allActiveAlerts, groupedAlerts } = await processOrders(orders);
     log('RulesEngine', 'SUCCESS');

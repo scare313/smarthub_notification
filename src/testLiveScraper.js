@@ -72,23 +72,30 @@ async function runLiveTest() {
     }
 
     if (!clicked) {
-      console.log(`\n[Note] Card matching "${todayStr}" not explicitly found.`);
-      console.log(`Attempting to click the default selected card as fallback...`);
-      const selected = await page.$('.awui-pick-create-card-selected');
-      if (selected) {
-        await selected.click();
-        clicked = true;
+      console.log(`\n[Note] Card matching "${todayStr}" not explicitly found for today. Skipping click and table wait.`);
+      const screenshotsDir = path.dirname(screenshotPath);
+      if (!fs.existsSync(screenshotsDir)) {
+        fs.mkdirSync(screenshotsDir, { recursive: true });
       }
+      await page.screenshot({ path: screenshotPath });
+      console.log(`Live screen captured successfully (No date card today) at: ${screenshotPath}`);
+      console.log('No active shipments pick lists found for today. Exiting.');
+      return;
     }
 
-    await page.waitForTimeout(3000); // Wait for table to reload with clicked date details
-
     // 2. Extract shipping lists from #awui-pick-recommended-table
-    console.log('Waiting for recommended table to load...');
-    await page.waitForSelector('#awui-pick-recommended-table table', { timeout: 10000 });
+    console.log('Waiting for recommended table to load and become visible...');
+    await page.waitForSelector('#awui-pick-recommended-table table', { state: 'visible', timeout: 15000 });
     
-    // Wait a brief 2 seconds for rows to fully render visually
-    await page.waitForTimeout(2000);
+    // Wait for network to settle
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 4000 });
+    } catch (e) {
+      // Ignore networkidle timeout
+    }
+    
+    // Wait a solid 3 seconds for rows to fully render visually
+    await page.waitForTimeout(3000);
 
     // 3. Capture a live screenshot of the fully loaded pick screen
     const screenshotsDir = path.dirname(screenshotPath);
