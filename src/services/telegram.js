@@ -22,6 +22,16 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
     messageText += `*Marketplace:* SmartHUB\n\n`;
     messageText += `*Status:* All Clear ✅\n\n`;
     messageText += `No pending pick lists are present or scheduled for today.\n`;
+  } else if (orders.length === 1 && orders[0].orderId === 'Session Logged Out') {
+    messageText = `🚨 *EMERGENCY: SESSION LOGGED OUT*\n\n`;
+    messageText += `*Marketplace:* SmartHUB\n\n`;
+    messageText += `*Status:* Logged Out ❌\n\n`;
+    messageText += `⚠️ *ACTION REQUIRED IMMEDIATELY:*\n`;
+    messageText += `Your automated Shipping Alert Assistant has been logged out of the portal!\n\n`;
+    messageText += `Kindly log in manually on your server immediately to restore the session:\n`;
+    messageText += `1. Open your terminal.\n`;
+    messageText += `2. Run command: \`npm run manual-login\`\n`;
+    messageText += `3. Solve any CAPTCHAs, OTPs, or 2FA credentials.\n`;
   } else {
     messageText = `${emoji} SHIPPING ALERT\n\n`;
     messageText += `*Marketplace:* ${marketplace}\n\n`;

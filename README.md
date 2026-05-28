@@ -84,6 +84,41 @@ docker compose up --build
 
 ---
 
+## 4. Manual Session Setup & Session Recovery
+
+To safeguard your login details and satisfy Multi-Factor Authentication (OTP, CAPTCHAs, 2FA), cookies are persistently ignored by `.gitignore` and never committed. Therefore, you must initialize your session once upon first deployment, or whenever a session expires.
+
+### First-Time Setup & Manual Login
+1. Fill in your real SmartHUB portal details in `.env`:
+   ```ini
+   OMS_URL=https://smarthub.amazon.in
+   OMS_DASHBOARD_PATH=/pick
+   OMS_DASHBOARD_URL_PATTERN=**/pick
+   ```
+2. Run the headful manual session builder:
+   ```bash
+   npm run manual-login
+   ```
+3. A visible browser window will open. Complete your login details, Captchas, or OTPs.
+4. Once you land on the dashboard (`/pick`), the script will automatically capture your session cookies, save them securely to `src/storage/auth.json`, and close.
+
+### Session Expiration & Emergency Recovery
+If your portal session expires or gets logged out, the background scheduler will:
+- **Immediately detect** the logged-out screen.
+- **Deduplicate alerts** to prevent spam (notifying you once every 30 minutes).
+- **Dispatch a Critical Alarm Alert (🚨)** directly to all of your configured Telegram individual chats, attaching the visual screenshot of the login screen.
+
+**How to Recover:**
+When you receive the Telegram session alarm:
+1. Open your terminal in the repository path:
+   ```bash
+   npm run manual-login
+   ```
+2. Perform the login manually, let it save, and close.
+3. The background service (`npm start`) will automatically resume headless checks without requiring a service restart!
+
+---
+
 ## SLA & Escalation Rules (`src/config/sla.json`)
 The rules can be fine-tuned directly in the JSON mapping:
 ```json

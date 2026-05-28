@@ -54,30 +54,27 @@ async function fetchOrders() {
 
   try {
     console.log(`Navigating to dashboard: ${dashboardUrl}`);
-    const response = await page.goto(dashboardUrl, { waitUntil: 'load', timeout: 15000 });
+    const response = await page.goto(dashboardUrl, { waitUntil: 'load', timeout: 20000 });
 
-    // Step 2: Session Expiration Handling
+    // Wait a brief moment for DOM elements to fully settle
+    await page.waitForTimeout(4000);
+
+    // Verify Session Status (Logged-Out Detection)
     const currentUrl = page.url();
-    if (currentUrl === `${url}/` || currentUrl.includes('/login') || response.status() === 401) {
-      console.log('Session expired. Refreshing authentication...');
-      await page.close();
-      await context.close();
-      
-      // Perform re-login
-      await performLogin(url, username, password, headless);
-      
-      // Create new context & page
-      const newContext = await browser.newContext({ storageState: authPath });
-      const newPage = await newContext.newPage();
-      
-      // Setup interception on new page
-      const newInterceptor = await setupInterception(newPage, apiInterceptPattern);
-      
-      const newDashboardUrl = safeJoinUrl(url, dashboardPath);
-      console.log('Re-navigating to dashboard after fresh login...');
-      await newPage.goto(newDashboardUrl, { waitUntil: 'load', timeout: 15000 });
-      
-      return await extractData(newPage, newInterceptor, screenshotPath);
+    const isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin') || currentUrl === `${url}/` || currentUrl === url;
+    const hasPasswordInput = (await page.$('input[type="password"]')) !== null;
+    const cards = await page.$$('.awui-pick-create-card');
+    const isLoggedOut = isLoginPage || hasPasswordInput || cards.length === 0;
+
+    if (isLoggedOut) {
+      console.error('[Scraper] Session is logged out! Redirected to login page or picker elements completely missing.');
+      try {
+        await page.screenshot({ path: screenshotPath });
+        console.log(`Logged-out screenshot successfully captured at: ${screenshotPath}`);
+      } catch (err) {
+        console.error('Failed to capture logged-out screenshot:', err);
+      }
+      throw new Error('SESSION_LOGGED_OUT');
     }
 
     return await extractData(page, interceptor, screenshotPath);

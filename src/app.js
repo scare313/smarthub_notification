@@ -116,6 +116,32 @@ async function runSingleCycle() {
   } catch (err) {
     const duration = Date.now() - startTime;
     log('FetchOrdersCycle', 'FAILED', duration, err);
+
+    if (err.message === 'SESSION_LOGGED_OUT') {
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const hour = now.getHours();
+      const halfHour = now.getMinutes() < 30 ? '00' : '30';
+      const expiredKey = `SessionExpired_${dateStr}_${hour}_${halfHour}`;
+      const alreadyNotified = await db.hasBeenNotified(expiredKey, 'critical');
+
+      if (!alreadyNotified) {
+        console.log('[App] Session is logged out! Sending emergency alert...');
+        const emergencyAlert = {
+          marketplace: 'SmartHUB',
+          alertLevel: 'critical',
+          orders: [{ orderId: 'Session Logged Out', sku: 'Urgent action required' }]
+        };
+        const screenshotPath = path.join(__dirname, '..', 'screenshots', 'dashboard.png');
+        try {
+          await sendTelegramAlert(emergencyAlert, screenshotPath);
+          log('SendTelegramAlert:EmergencyLoggedOut', 'SUCCESS');
+          await db.recordNotification(expiredKey, 'SmartHUB', 'critical');
+        } catch (alertErr) {
+          log('SendTelegramAlert:EmergencyLoggedOut', 'FAILED', null, alertErr);
+        }
+      }
+    }
     throw err;
   }
 }
