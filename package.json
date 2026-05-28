@@ -8,6 +8,8 @@
     "mock-server": "node mock-server/server.js",
     "manual-login": "node src/scraper/manualLogin.js",
     "test-live": "node src/testLiveScraper.js",
+    "discover-api": "node src/scraper/discoverApi.js",
+    "setup-startup": "node src/setupStartup.js",
     "dev": "node src/app.js"
   },
   "dependencies": {

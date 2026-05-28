@@ -2,6 +2,55 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../database/sqlite');
 
+function formatShipTime(isoString) {
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata'
+    });
+  } catch {
+    return 'Unknown';
+  }
+}
+
+function getBeautifulChannelName(o) {
+  const rawChannel = o.orderId.split('_')[0];
+  switch (rawChannel) {
+    case 'SELLER_FLEX':
+      return 'Amazon (Seller Flex)';
+    case 'EASY_SHIP':
+      return 'Amazon (Easy Ship)';
+    case 'FBA':
+      return 'Amazon (FBA)';
+    case 'MFN':
+      return 'Amazon (Merchant Fulfilled)';
+    case 'FKSTANDARD':
+      return 'Flipkart';
+    case 'MEESHO':
+      return 'Meesho';
+    case 'SHOPIFY':
+      return 'Shopify';
+    default:
+      // If it starts with P17 etc (active pick list ID), we can fallback to marketplace
+      if (rawChannel.startsWith('P17')) {
+        return o.marketplace;
+      }
+      return rawChannel || o.marketplace;
+  }
+}
+
+function getChannelEmoji(name) {
+  const lower = name.toLowerCase();
+  if (lower.includes('amazon')) return '📦';
+  if (lower.includes('flipkart')) return '🛍️';
+  if (lower.includes('meesho')) return '⚡';
+  if (lower.includes('shopify')) return '🛒';
+  return '📦';
+}
+
 async function sendTelegramAlert(groupAlert, screenshotPath = null) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const rawChatIds = process.env.TELEGRAM_CHAT_ID || '';
@@ -18,33 +67,74 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
   // Construct message text
   let messageText = '';
   if (orders.length === 1 && orders[0].orderId === 'All Clear') {
-    messageText = `ℹ️ SHIPPING STATUS UPDATE\n\n`;
-    messageText += `*Marketplace:* SmartHUB\n\n`;
-    messageText += `*Status:* All Clear ✅\n\n`;
-    messageText += `No pending pick lists are present or scheduled for today.\n`;
+    messageText = `<b>🌟 SmartHUB Shipping Assistant 🌟</b>\n`;
+    messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    messageText += `<b>✅ STATUS:</b> All Clear!\n`;
+    messageText += `<b>🏢 Marketplace:</b> SmartHUB\n\n`;
+    messageText += `🎉 No pending or scheduled pick lists found for today. Your dashboard is completely clean!\n`;
+    messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━`;
   } else if (orders.length === 1 && orders[0].orderId === 'Session Logged Out') {
-    messageText = `🚨 *EMERGENCY: SESSION LOGGED OUT*\n\n`;
-    messageText += `*Marketplace:* SmartHUB\n\n`;
-    messageText += `*Status:* Logged Out ❌\n\n`;
-    messageText += `⚠️ *ACTION REQUIRED IMMEDIATELY:*\n`;
-    messageText += `Your automated Shipping Alert Assistant has been logged out of the portal!\n\n`;
-    messageText += `Kindly log in manually on your server immediately to restore the session:\n`;
-    messageText += `1. Open your terminal.\n`;
-    messageText += `2. Run command: \`npm run manual-login\`\n`;
-    messageText += `3. Solve any CAPTCHAs, OTPs, or 2FA credentials.\n`;
+    messageText = `<b>🔥 CRITICAL EMERGENCY: ACTION REQUIRED</b> 🔥\n`;
+    messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    messageText += `<b>🚨 SYSTEM STATUS:</b> SESSION LOGGED OUT ❌\n`;
+    messageText += `<b>🏢 Portal:</b> SmartHUB Dashboard\n`;
+    messageText += `<b>⚠️ Urgency:</b> Immediate / High\n\n`;
+    messageText += `Your automated Shipping Alert Assistant has been logged out and can no longer scan for orders!\n\n`;
+    messageText += `<b>🛠️ HOW TO RESTORE THE SESSION:</b>\n`;
+    messageText += `1️⃣ Open your server/terminal.\n`;
+    messageText += `2️⃣ Execute the command:\n`;
+    messageText += `   <code>npm run manual-login</code>\n`;
+    messageText += `3️⃣ Complete the login process (solve CAPTCHAs/OTP/2FA).\n\n`;
+    messageText += `<i>Do not delay! Pending orders might be missed while the session is offline.</i>\n`;
+    messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━`;
   } else {
-    messageText = `${emoji} SHIPPING ALERT\n\n`;
-    messageText += `*Marketplace:* ${marketplace}\n\n`;
-    messageText += `*Pending Orders:* ${orders.length}\n\n`;
-    
-    if (remainingMins !== undefined) {
-      messageText += `*Remaining Time:* ${remainingMins} mins\n\n`;
+    let levelText = alertLevel.toUpperCase();
+    let levelEmoji = 'ℹ️';
+    if (alertLevel === 'warning') levelEmoji = '⚠️';
+    else if (alertLevel === 'urgent') levelEmoji = '🔥';
+    else if (alertLevel === 'critical') levelEmoji = '🚨';
+
+    messageText = `<b>${levelEmoji} SmartHUB Shipping Alert</b>\n`;
+    messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    messageText += `<b>🏢 Marketplace:</b> <code>${marketplace}</code>\n`;
+    messageText += `<b>⚠️ Alert Level:</b> ${levelEmoji} <b>${levelText}</b>\n`;
+    if (remainingMins !== undefined && remainingMins !== null && remainingMins !== Infinity) {
+      messageText += `<b>⏳ Time Remaining:</b> <b>${remainingMins}</b> minutes\n`;
     }
+    messageText += `<b>📦 Pending Lists:</b> <b>${orders.length}</b>\n\n`;
     
-    messageText += `*Order IDs:*\n`;
-    orders.forEach(o => {
-      messageText += `\`${o.orderId}\` (${o.sku})\n`;
+    messageText += `<b>📋 Pending Lists Detail:</b>\n\n`;
+    orders.forEach((o) => {
+      const isMissed = o.status === 'missed';
+      const channelName = getBeautifulChannelName(o);
+      const emoji = isMissed ? '🔴' : getChannelEmoji(channelName);
+      
+      // Clean up sku string for display
+      let cleanSku = o.sku;
+      const activeListIndex = cleanSku.indexOf(', Active list ID:');
+      if (activeListIndex !== -1) {
+        cleanSku = cleanSku.substring(0, activeListIndex) + ')';
+      }
+
+      if (cleanSku) {
+        cleanSku = cleanSku.charAt(0).toUpperCase() + cleanSku.slice(1);
+      }
+      
+      const shipTimeStr = formatShipTime(o.createdTime);
+      const timeLabel = isMissed ? 'SLA' : 'Ship by';
+      
+      messageText += `${emoji} <b>${channelName}</b>`;
+      if (isMissed) {
+        messageText += ` ⚠️ <b>[MISSED]</b>`;
+      }
+      messageText += `\n`;
+      messageText += `  └ 📦 <i>${cleanSku}</i>\n`;
+      messageText += `  └ 🕒 ${timeLabel}: <b>${shipTimeStr}</b>\n\n`;
     });
+    
+    messageText = messageText.trim();
+    messageText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    messageText += `🔔 <i>Please take action immediately to process these orders.</i>`;
   }
 
   // If token is placeholder or not configured, fall back to mock logger
@@ -85,7 +175,7 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
           const formData = new FormData();
           formData.append('chat_id', chatId);
           formData.append('caption', messageText);
-          formData.append('parse_mode', 'Markdown');
+          formData.append('parse_mode', 'HTML');
 
           const fileBuffer = fs.readFileSync(screenshotPath);
           const blob = new Blob([fileBuffer], { type: 'image/png' });
@@ -106,7 +196,7 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
             body: JSON.stringify({
               chat_id: chatId,
               text: messageText,
-              parse_mode: 'Markdown'
+              parse_mode: 'HTML'
             })
           });
         }

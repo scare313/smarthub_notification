@@ -14,8 +14,8 @@ async function runLiveTest() {
     // Initialize SQLite database
     await db.init();
 
-    // 1. Fetch live orders across both Create and Active tabs using production scraper!
-    const orders = await fetchOrders();
+    // 1. Fetch live orders across both Create and Active tabs using production scraper in Test Mode!
+    const orders = await fetchOrders(true);
 
     console.log(`\n[Live Test] Extracted ${orders.length} orders across both tabs!`);
     console.log(orders);
@@ -46,7 +46,7 @@ async function runLiveTest() {
       const modifiedAlert = {
         marketplace: 'SmartHUB Create Tab',
         alertLevel: 'critical',
-        orders: createOrders.map(l => ({ orderId: `${l.marketplace} (${l.sku})`, sku: `SLA` }))
+        orders: createOrders
       };
       await sendTelegramAlert(modifiedAlert, screenshotPath);
       console.log('SUCCESS! Dispatched Create tab alert with screenshot.');
@@ -57,7 +57,7 @@ async function runLiveTest() {
       const modifiedAlert = {
         marketplace: 'SmartHUB Active Tab',
         alertLevel: 'critical',
-        orders: activeOrders.map(l => ({ orderId: `${l.marketplace} (${l.sku})`, sku: `SLA: Urgent` }))
+        orders: activeOrders
       };
       await sendTelegramAlert(modifiedAlert, screenshotActivePath);
       console.log('SUCCESS! Dispatched Active tab alert with screenshot.');
