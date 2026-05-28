@@ -9,9 +9,10 @@ if (!fs.existsSync(screenshotsDir)) {
   fs.mkdirSync(screenshotsDir, { recursive: true });
 }
 const screenshotPath = path.join(screenshotsDir, 'dashboard.png');
+const screenshotActivePath = path.join(screenshotsDir, 'active_dashboard.png');
 
 async function fetchOrders() {
-  const url = process.env.OMS_URL || 'http://localhost:3000';
+  const url = process.env.OMS_URL || 'https://smarthub.amazon.in';
   const username = process.env.OMS_USERNAME || 'admin';
   const password = process.env.OMS_PASSWORD || 'supersecurepassword';
   const headless = process.env.HEADLESS !== 'false';
@@ -77,7 +78,7 @@ async function fetchOrders() {
       throw new Error('SESSION_LOGGED_OUT');
     }
 
-    return await extractData(page, interceptor, screenshotPath);
+    return await extractData(page, interceptor, screenshotPath, screenshotActivePath);
 
   } catch (err) {
     console.error('Error fetching orders from dashboard:', err);
@@ -87,7 +88,7 @@ async function fetchOrders() {
   }
 }
 
-async function extractData(page, interceptor, screenshotPath) {
+async function extractData(page, interceptor, screenshotPath, screenshotActivePath) {
   // Wait a short time for page to settle
   await page.waitForTimeout(4000);
 
@@ -112,7 +113,30 @@ async function extractData(page, interceptor, screenshotPath) {
   const todayStr = getTodayDateString();
   console.log(`[Scraper] Today's target date string: "${todayStr}"`);
 
-  // 1. Locate and click today's date card
+  // Helper to check if a table is fully loaded (rows > 0 and rows contain text)
+  const waitTablePopulated = async (targetId) => {
+    console.log(`[Scraper] Waiting for table ${targetId} to load completely...`);
+    await page.waitForSelector(`${targetId} table`, { state: 'visible', timeout: 15000 });
+    
+    await page.waitForFunction((id) => {
+      const rows = document.querySelectorAll(`${id} table tbody tr`);
+      return rows.length > 0 && rows[0].textContent.trim().length > 0;
+    }, targetId, { timeout: 15000 });
+
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 4000 });
+    } catch (e) {
+      // Ignore networkidle timeouts
+    }
+
+    await page.waitForTimeout(3000); // 3 seconds extra render settle delay
+  };
+
+  const allOrders = [];
+
+  // ==========================================
+  // STEP 1: SCRAPE CREATE TAB
+  // ==========================================
   let clicked = false;
   try {
     const cards = await page.$$('.awui-pick-create-card');
@@ -130,80 +154,162 @@ async function extractData(page, interceptor, screenshotPath) {
     console.warn('[Scraper] Warning: Error checking date cards:', cardErr.message);
   }
 
-  // If today's date card was NOT found on the page, stop, capture screenshot, and return empty list
+  // If today's card is not found, we skip the Create tab scraping
   if (!clicked) {
-    console.log(`[Scraper] Card matching "${todayStr}" not explicitly found for today. Skipping click and table wait.`);
+    console.log(`[Scraper] Card matching "${todayStr}" not explicitly found for today. Skipping Create tab.`);
     try {
-      const screenshotsDir = path.dirname(screenshotPath);
-      if (!fs.existsSync(screenshotsDir)) {
-        fs.mkdirSync(screenshotsDir, { recursive: true });
+      await page.screenshot({ path: screenshotPath });
+      console.log(`Create screen captured successfully (No date card today) at: ${screenshotPath}`);
+    } catch (err) {
+      console.error('Failed to capture Create screenshot:', err);
+    }
+  } else {
+    // If today's card is found, wait for table load, take screenshot, and parse
+    try {
+      await waitTablePopulated('#awui-pick-recommended-table');
+
+      // Capture screenshot of the fully populated recommended table
+      try {
+        await page.screenshot({ path: screenshotPath });
+        console.log(`Create tab screenshot successfully captured at: ${screenshotPath}`);
+      } catch (err) {
+        console.error('Failed to capture Create tab screenshot:', err);
       }
-      await page.screenshot({ path: screenshotPath });
-      console.log(`Dashboard screenshot successfully captured (No date card today) at: ${screenshotPath}`);
-    } catch (err) {
-      console.error('Failed to capture dashboard screenshot:', err);
+
+      const today = new Date();
+      const dateStr = today.toISOString().split('T')[0];
+
+      // Extract recommended list from table
+      const recommendedPickLists = await page.evaluate(({ sel, datePrefix }) => {
+        const rows = Array.from(document.querySelectorAll(sel));
+        
+        return rows.map(row => {
+          const cells = Array.from(row.querySelectorAll('td'));
+          if (cells.length < 6) return null; // Skip summary rows
+
+          const priority = cells[1].textContent.trim();
+          const orderCountText = cells[2].querySelector('p:first-child')?.textContent?.trim() || cells[2].textContent.trim();
+          const orderType = cells[2].querySelector('p:nth-child(2)')?.textContent?.trim() || '';
+          const shipoutTimeText = cells[4].textContent.trim();
+          const channel = cells[5].textContent.trim();
+
+          if (!channel || channel.toLowerCase().includes('total')) return null;
+
+          let marketplace = 'Amazon';
+          if (channel.toLowerCase().includes('flipkart')) {
+            marketplace = 'Flipkart';
+          } else if (channel.toLowerCase().includes('meesho')) {
+            marketplace = 'Meesho';
+          }
+
+          const cleanChannel = channel.replace(/\s+/g, '');
+          const cleanTime = shipoutTimeText.replace(/\s+|:/g, '-');
+          const orderId = `${cleanChannel}_${cleanTime}_${datePrefix}`;
+
+          return {
+            orderId,
+            marketplace,
+            status: 'pending',
+            customer: `Priority ${priority}`,
+            sku: `${orderCountText} orders (${orderType || 'Standard'})`,
+            orderValue: orderCountText,
+            timeText: shipoutTimeText
+          };
+        }).filter(Boolean);
+      }, { sel: '#awui-pick-recommended-table table tbody tr', datePrefix: dateStr });
+
+      // Map recommended lists
+      recommendedPickLists.forEach(list => {
+        let [time, modifier] = list.timeText.split(' ');
+        let [hours, minutes] = time.split(':');
+        hours = parseInt(hours, 10);
+        
+        if (modifier === 'PM' && hours < 12) {
+          hours = hours + 12;
+        }
+        if (modifier === 'AM' && hours === 12) {
+          hours = 0;
+        }
+        
+        const pad = (num) => String(num).padStart(2, '0');
+        const createdTime = `${dateStr}T${pad(hours)}:${pad(minutes)}:00+05:30`;
+
+        allOrders.push({
+          orderId: list.orderId,
+          marketplace: list.marketplace,
+          createdTime,
+          status: list.status,
+          customer: list.customer,
+          sku: list.sku,
+          orderValue: list.orderValue,
+          isFromActiveTab: false
+        });
+      });
+
+      console.log(`[Scraper] Successfully scraped ${recommendedPickLists.length} pick lists from Create tab.`);
+    } catch (createScrapeErr) {
+      console.error('[Scraper] Error scraping Create tab pick lists:', createScrapeErr.message);
     }
-    return [];
   }
 
-  // Priority 1: Network Interceptor data (fallback if background requests are intercepted)
-  const apiData = interceptor.getData();
-  if (apiData && apiData.orders) {
-    // Capture screenshot since we have successfully got data
-    try {
-      await page.screenshot({ path: screenshotPath });
-      console.log(`Dashboard screenshot successfully captured (Priority 1) at: ${screenshotPath}`);
-    } catch (err) {
-      console.error('Failed to capture dashboard screenshot:', err);
-    }
-    console.log(`Priority 1: Successfully extracted ${apiData.orders.length} orders via network interception.`);
-    return apiData.orders;
-  }
-
-  // Priority 2: DOM Scraping Fallback (Scrapes the recommended pick table)
-  console.log('Priority 1 Interception did not capture standard data. Scraping recommended pick table...');
+  // ==========================================
+  // STEP 2: SCRAPE ACTIVE PICK LISTS TAB
+  // ==========================================
   try {
-    // 2. Robust Table Wait: Wait for recommended table to load and become visible
-    console.log('[Scraper] Waiting for recommended table to load and become visible...');
-    await page.waitForSelector('#awui-pick-recommended-table table', { state: 'visible', timeout: 15000 });
+    console.log('[Scraper] Clicking on "Active pick lists" tab...');
+    await page.locator('label').filter({ hasText: 'Active pick lists' }).click();
     
-    // Wait for any background API calls/rendering network to settle
-    try {
-      await page.waitForLoadState('networkidle', { timeout: 4000 });
-    } catch (e) {
-      // Ignore networkidle timeout
-    }
-    
-    // 3. Render Buffer: Wait a solid 3 seconds for DOM rows to fully render visually
-    await page.waitForTimeout(3000);
+    // Wait for the active table to load and become visible
+    await waitTablePopulated('#awui-pick-active-table');
 
-    // Capture the fully loaded pick table screenshot
+    // Capture screenshot of the fully populated active table
     try {
-      await page.screenshot({ path: screenshotPath });
-      console.log(`Dashboard screenshot successfully captured (Priority 2) at: ${screenshotPath}`);
+      await page.screenshot({ path: screenshotActivePath });
+      console.log(`Active pick lists tab screenshot successfully captured at: ${screenshotActivePath}`);
     } catch (err) {
-      console.error('Failed to capture dashboard screenshot:', err);
+      console.error('Failed to capture Active tab screenshot:', err);
     }
 
+    // Helper to generate today's label matching column format (e.g. "Thursday 28th")
+    const getTodayLabelString = () => {
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const today = new Date();
+      const dayName = days[today.getDay()];
+      const date = today.getDate();
+      let suffix = 'th';
+      if (date === 1 || date === 21 || date === 31) suffix = 'st';
+      else if (date === 2 || date === 22) suffix = 'nd';
+      else if (date === 3 || date === 23) suffix = 'rd';
+      return `${dayName} ${date}${suffix}`;
+    };
+
+    const targetLabel = getTodayLabelString();
     const today = new Date();
     const dateStr = today.toISOString().split('T')[0];
 
-    const pickLists = await page.evaluate(({ sel, datePrefix }) => {
+    console.log(`[Scraper] Active list date match criteria: "${targetLabel}" or "Missed"`);
+
+    // Extract active lists from table
+    const activePickLists = await page.evaluate(({ sel, targetLabel, datePrefix }) => {
       const rows = Array.from(document.querySelectorAll(sel));
       
       return rows.map(row => {
         const cells = Array.from(row.querySelectorAll('td'));
-        if (cells.length < 6) return null; // Skip summary rows
+        if (cells.length < 8) return null; // Skip summary / partial rows
 
-        const priority = cells[1].textContent.trim();
-        const orderCountText = cells[2].querySelector('p:first-child')?.textContent?.trim() || cells[2].textContent.trim();
-        const orderType = cells[2].querySelector('p:nth-child(2)')?.textContent?.trim() || '';
-        const shipoutTimeText = cells[4].textContent.trim(); // E.g., "12:00 PM"
+        const picklistId = cells[1].querySelector('a')?.textContent?.trim() || cells[1].textContent.trim();
+        const priority = cells[2].textContent.trim();
+        const shipout = cells[4].textContent.trim(); // "Missed" or "Thursday 28th" etc.
         const channel = cells[5].textContent.trim();
+        const orderCountText = cells[6].textContent.trim();
+        const attributes = cells[7].textContent.trim();
 
-        if (!channel || channel.toLowerCase().includes('total')) return null;
+        // Check if Missed or matches today's label
+        const isMissed = shipout.toLowerCase() === 'missed';
+        const isToday = shipout.toLowerCase().includes(targetLabel.toLowerCase());
 
-        // Map channel to supported marketplace names for rules integration
+        if (!isMissed && !isToday) return null;
+
         let marketplace = 'Amazon';
         if (channel.toLowerCase().includes('flipkart')) {
           marketplace = 'Flipkart';
@@ -211,57 +317,77 @@ async function extractData(page, interceptor, screenshotPath) {
           marketplace = 'Meesho';
         }
 
-        // Generate a virtual unique orderId to avoid duplicate notifications
-        const cleanChannel = channel.replace(/\s+/g, '');
-        const cleanTime = shipoutTimeText.replace(/\s+|:/g, '-');
-        const orderId = `${cleanChannel}_${cleanTime}_${datePrefix}`;
+        const orderId = `${picklistId}_${isMissed ? 'Missed' : 'Today'}_${datePrefix}`;
 
         return {
           orderId,
           marketplace,
-          status: 'pending',
+          status: isMissed ? 'missed' : 'pending',
           customer: `Priority ${priority}`,
-          sku: `${orderCountText} orders (${orderType || 'Standard'})`,
+          sku: `${orderCountText} orders (${attributes || 'Standard'}, Active list ID: ${picklistId})`,
           orderValue: orderCountText,
-          timeText: shipoutTimeText
+          shipoutText: shipout
         };
       }).filter(Boolean);
-    }, { sel: '#awui-pick-recommended-table table tbody tr', datePrefix: dateStr });
+    }, { sel: '#awui-pick-active-table table tbody tr', targetLabel, datePrefix: dateStr });
 
-    // Map extracted pick lists to standard SLA createdTime
-    const mappedOrders = pickLists.map(list => {
-      // Parse "12:00 PM" and set createdTime to today's date with that time
-      let [time, modifier] = list.timeText.split(' ');
-      let [hours, minutes] = time.split(':');
-      hours = parseInt(hours, 10);
-      
-      if (modifier === 'PM' && hours < 12) {
-        hours = hours + 12;
-      }
-      if (modifier === 'AM' && hours === 12) {
-        hours = 0;
-      }
-      
-      const pad = (num) => String(num).padStart(2, '0');
-      const createdTime = `${dateStr}T${pad(hours)}:${pad(minutes)}:00+05:30`;
+    // Map and calculate createdTime for Active list items
+    const fs = require('fs');
+    const slaConfigPath = path.join(__dirname, '..', 'config', 'sla.json');
+    const slaConfig = JSON.parse(fs.readFileSync(slaConfigPath, 'utf8'));
 
-      return {
-        orderId: list.orderId,
-        marketplace: list.marketplace,
-        createdTime,
-        status: list.status,
-        customer: list.customer,
-        sku: list.sku,
-        orderValue: list.orderValue
-      };
+    activePickLists.forEach(list => {
+      // Calculate createdTime based on marketplace SLA
+      const now = new Date();
+      
+      // If it is already marked as missed, set SlaDate to yesterday to ensure rules engine triggers critical severity
+      if (list.status === 'missed') {
+        const yesterday = new Date();
+        yesterday.setDate(now.getDate() - 1);
+        yesterday.setHours(8, 0, 0, 0); // Yesterday 08:00 AM
+        
+        allOrders.push({
+          orderId: list.orderId,
+          marketplace: list.marketplace,
+          createdTime: yesterday.toISOString(),
+          status: list.status,
+          customer: list.customer,
+          sku: list.sku,
+          orderValue: list.orderValue,
+          isFromActiveTab: true
+        });
+      } else {
+        // Today's active list
+        const slaTime = slaConfig.slas[list.marketplace] || '12:00';
+        const [hours, minutes] = slaTime.split(':').map(Number);
+        
+        const slaDate = new Date();
+        slaDate.setHours(hours, minutes, 0, 0);
+
+        allOrders.push({
+          orderId: list.orderId,
+          marketplace: list.marketplace,
+          createdTime: slaDate.toISOString(),
+          status: list.status,
+          customer: list.customer,
+          sku: list.sku,
+          orderValue: list.orderValue,
+          isFromActiveTab: true
+        });
+      }
     });
 
-    console.log(`Priority 2: Successfully scraped ${mappedOrders.length} pick lists from DOM.`);
-    return mappedOrders;
-  } catch (domErr) {
-    console.error('Priority 2: DOM Scraping of pick table failed:', domErr.message);
+    console.log(`[Scraper] Successfully scraped ${activePickLists.length} pick lists from Active tab.`);
+  } catch (activeScrapeErr) {
+    console.error('[Scraper] Error scraping Active tab pick lists:', activeScrapeErr.message);
+  }
+
+  // Fallback to error if absolutely no data scraped on both tabs (excluding empty days)
+  if (clicked && allOrders.length === 0 && !fs.existsSync(screenshotPath)) {
     throw new Error('Both Network Interception and DOM Scraping failed.');
   }
+
+  return allOrders;
 }
 
 module.exports = { fetchOrders };

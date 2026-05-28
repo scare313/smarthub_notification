@@ -82,12 +82,19 @@ async function runSingleCycle() {
 
     // 3. Send alerts for each group
     const screenshotPath = path.join(__dirname, '..', 'screenshots', 'dashboard.png');
+    const screenshotActivePath = path.join(__dirname, '..', 'screenshots', 'active_dashboard.png');
+
     for (const groupAlert of groupedAlerts) {
       try {
         log(`SendTelegramAlert:${groupAlert.marketplace}:${groupAlert.alertLevel}`, 'STARTED');
         // Attach screenshot for critical/urgent/warning events
         const attachScreenshot = groupAlert.alertLevel !== 'informational';
-        await sendTelegramAlert(groupAlert, attachScreenshot ? screenshotPath : null);
+        
+        // Dynamically select target screenshot path
+        const isFromActiveTab = groupAlert.orders.some(o => o.orderId.startsWith('P17') || o.sku.includes('Active list ID'));
+        const targetScreenshot = isFromActiveTab ? screenshotActivePath : screenshotPath;
+
+        await sendTelegramAlert(groupAlert, attachScreenshot ? targetScreenshot : null);
         log(`SendTelegramAlert:${groupAlert.marketplace}:${groupAlert.alertLevel}`, 'SUCCESS');
       } catch (alertErr) {
         log(`SendTelegramAlert:${groupAlert.marketplace}:${groupAlert.alertLevel}`, 'FAILED', null, alertErr);
