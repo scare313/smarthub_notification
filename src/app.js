@@ -153,7 +153,32 @@ async function runSingleCycle() {
   }
 }
 
+// Programmatically disable Windows Console QuickEdit Mode to prevent script freeze on accidental clicks
+function disableQuickEdit() {
+  if (process.platform !== 'win32') return;
+
+  const { exec } = require('child_process');
+  // 0x0040 is the ENABLE_QUICK_EDIT_MODE flag. We do bitwise AND with NOT 0x0040 to disable it.
+  const psCommand = `powershell -NoProfile -Command "
+    $signature = '[DllImport(\\"kernel32.dll\\")] public static extern IntPtr GetStdHandle(int n); [DllImport(\\"kernel32.dll\\")] public static extern bool GetConsoleMode(IntPtr h, out uint m); [DllImport(\\"kernel32.dll\\")] public static extern bool SetConsoleMode(IntPtr h, uint m);';
+    Add-Type -MemberDefinition $signature -Name Win32Console -Namespace Win32API;
+    $h = [Win32API.Win32Console]::GetStdHandle(-10);
+    $m = 0;
+    [Win32API.Win32Console]::GetConsoleMode($h, [ref]$m);
+    [Win32API.Win32Console]::SetConsoleMode($h, ($m -band -not 0x0040));
+  "`;
+
+  exec(psCommand, (err) => {
+    if (err) {
+      console.warn('[System] Failed to programmatically disable QuickEdit mode:', err.message);
+    } else {
+      console.log('[System] QuickEdit Mode programmatically disabled (Script freeze prevention active) ✅');
+    }
+  });
+}
+
 async function bootstrap() {
+  disableQuickEdit();
   console.log('SmartHUB OMS Shipping Alert Assistant starting...');
   
   try {

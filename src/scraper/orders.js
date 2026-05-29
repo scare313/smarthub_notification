@@ -79,21 +79,36 @@ async function fetchOrders(useDefaultDate = false) {
     console.log('[Scraper] Waiting for dashboard elements or login screen...');
     try {
       await Promise.race([
-        page.waitForSelector('.awui-pick-create-card', { timeout: 15000 }),
-        page.waitForSelector('input[type="password"]', { timeout: 15000 })
+        page.waitForSelector('.awui-pick-create-card', { timeout: 20000 }),
+        page.waitForSelector('input[type="password"]', { timeout: 20000 }),
+        page.waitForSelector('#auth-mfa-otpcode', { timeout: 20000 })
       ]);
     } catch (err) {
-      console.warn('[Scraper] Warning: Neither dashboard cards nor login password input appeared within 15 seconds.');
+      console.warn('[Scraper] Warning: Neither dashboard cards nor login input appeared within 20 seconds.');
     }
 
     // ========================================
     // Verify Session Status (Logged-Out Detection)
     // ========================================
     let currentUrl = page.url();
-    let isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin') || currentUrl === `${url}/` || currentUrl === url;
     let hasPasswordInput = (await page.$('input[type="password"]')) !== null;
+    let hasMfaInput = (await page.$('#auth-mfa-otpcode, input[name="otpCode"]')) !== null;
     let cards = await page.$$('.awui-pick-create-card');
-    let isLoggedOut = isLoginPage || hasPasswordInput || cards.length === 0;
+
+    // We're on a login/auth page if the URL contains /ap/signin, /ap/mfa, or /login
+    let isOnAuthPage = currentUrl.includes('/ap/signin') || currentUrl.includes('/ap/mfa') || currentUrl.includes('/login');
+    // We're on the dashboard if URL contains /pick, /dashboard, or smarthub paths
+    let isOnDashboard = currentUrl.includes('/pick') || currentUrl.includes('/dashboard');
+
+    // Logged out = clearly on an auth page, OR has a password/MFA input visible
+    // NOT logged out just because cards haven't loaded yet on a valid dashboard URL
+    let isLoggedOut = isOnAuthPage || hasPasswordInput || hasMfaInput;
+    if (!isLoggedOut && !isOnDashboard && cards.length === 0) {
+      // If we're not on auth page AND not on dashboard AND no cards → likely redirected to root = logged out
+      isLoggedOut = true;
+    }
+
+    console.log(`[Scraper] Session check: URL=${currentUrl}, onAuth=${isOnAuthPage}, onDashboard=${isOnDashboard}, cards=${cards.length}, loggedOut=${isLoggedOut}`);
 
     // If logged out, attempt automatic in-flight re-login!
     if (isLoggedOut) {
@@ -115,14 +130,28 @@ async function fetchOrders(useDefaultDate = false) {
       interceptor = new ApiInterceptor(page);
 
       console.log(`Navigating to dashboard: ${dashboardUrl}`);
-      await page.goto(dashboardUrl, { waitUntil: 'load', timeout: 20000 });
+      await page.goto(dashboardUrl, { waitUntil: 'load', timeout: 30000 });
 
-      // Verify again
+      // Wait longer for dashboard elements after re-login
+      try {
+        await page.waitForSelector('.awui-pick-create-card', { timeout: 25000 });
+      } catch {
+        console.warn('[Scraper] Dashboard cards did not appear after re-login within 25s.');
+      }
+
+      // Verify again with same smarter logic
       currentUrl = page.url();
-      isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin') || currentUrl === `${url}/` || currentUrl === url;
       hasPasswordInput = (await page.$('input[type="password"]')) !== null;
+      hasMfaInput = (await page.$('#auth-mfa-otpcode, input[name="otpCode"]')) !== null;
       cards = await page.$$('.awui-pick-create-card');
-      isLoggedOut = isLoginPage || hasPasswordInput || cards.length === 0;
+      isOnAuthPage = currentUrl.includes('/ap/signin') || currentUrl.includes('/ap/mfa') || currentUrl.includes('/login');
+      isOnDashboard = currentUrl.includes('/pick') || currentUrl.includes('/dashboard');
+      isLoggedOut = isOnAuthPage || hasPasswordInput || hasMfaInput;
+      if (!isLoggedOut && !isOnDashboard && cards.length === 0) {
+        isLoggedOut = true;
+      }
+
+      console.log(`[Scraper] Post-login check: URL=${currentUrl}, onAuth=${isOnAuthPage}, onDashboard=${isOnDashboard}, cards=${cards.length}, loggedOut=${isLoggedOut}`);
 
       if (isLoggedOut) {
         console.error('[Scraper] Double check failed: Session is still logged out after re-login attempt.');
@@ -135,6 +164,7 @@ async function fetchOrders(useDefaultDate = false) {
         throw new Error('SESSION_LOGGED_OUT');
       }
     }
+
 
     // ========================================
     // Extract data using API-first approach

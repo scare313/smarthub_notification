@@ -20,21 +20,20 @@ function getBeautifulChannelName(o) {
   const rawChannel = o.orderId.split('_')[0];
   switch (rawChannel) {
     case 'SELLER_FLEX':
-      return 'Amazon (Seller Flex)';
+      return 'Amazon Seller Flex';
     case 'EASY_SHIP':
-      return 'Amazon (Easy Ship)';
+      return 'Amazon Easy Ship';
     case 'FBA':
-      return 'Amazon (FBA)';
+      return 'Amazon FBA';
     case 'MFN':
-      return 'Amazon (Merchant Fulfilled)';
+      return 'Amazon Merchant Fulfilled';
     case 'FKSTANDARD':
-      return 'Flipkart';
+      return 'Flipkart Standard';
     case 'MEESHO':
       return 'Meesho';
     case 'SHOPIFY':
       return 'Shopify';
     default:
-      // If it starts with P17 etc (active pick list ID), we can fallback to marketplace
       if (rawChannel.startsWith('P17')) {
         return o.marketplace;
       }
@@ -57,12 +56,6 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
   const chatIds = rawChatIds.split(',').map(id => id.trim()).filter(Boolean);
 
   const { marketplace, alertLevel, remainingMins, orders } = groupAlert;
-
-  // Choose emoji based on alert level
-  let emoji = 'ℹ️';
-  if (alertLevel === 'warning') emoji = '⚠️';
-  else if (alertLevel === 'urgent') emoji = '🔥';
-  else if (alertLevel === 'critical') emoji = '🚨';
 
   // Construct message text
   let messageText = '';
@@ -88,53 +81,55 @@ async function sendTelegramAlert(groupAlert, screenshotPath = null) {
     messageText += `<i>Do not delay! Pending orders might be missed while the session is offline.</i>\n`;
     messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━`;
   } else {
-    let levelText = alertLevel.toUpperCase();
     let levelEmoji = 'ℹ️';
     if (alertLevel === 'warning') levelEmoji = '⚠️';
     else if (alertLevel === 'urgent') levelEmoji = '🔥';
     else if (alertLevel === 'critical') levelEmoji = '🚨';
 
-    messageText = `<b>${levelEmoji} SmartHUB Shipping Alert</b>\n`;
-    messageText += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    messageText += `<b>🏢 Marketplace:</b> <code>${marketplace}</code>\n`;
-    messageText += `<b>⚠️ Alert Level:</b> ${levelEmoji} <b>${levelText}</b>\n`;
-    if (remainingMins !== undefined && remainingMins !== null && remainingMins !== Infinity) {
-      messageText += `<b>⏳ Time Remaining:</b> <b>${remainingMins}</b> minutes\n`;
-    }
-    messageText += `<b>📦 Pending Lists:</b> <b>${orders.length}</b>\n\n`;
-    
-    messageText += `<b>📋 Pending Lists Detail:</b>\n\n`;
-    orders.forEach((o) => {
-      const isMissed = o.status === 'missed';
-      const channelName = getBeautifulChannelName(o);
-      const emoji = isMissed ? '🔴' : getChannelEmoji(channelName);
-      
-      // Clean up sku string for display
-      let cleanSku = o.sku;
-      const activeListIndex = cleanSku.indexOf(', Active list ID:');
-      if (activeListIndex !== -1) {
-        cleanSku = cleanSku.substring(0, activeListIndex) + ')';
-      }
+    const levelText = `[${levelEmoji}${alertLevel.toUpperCase()}]`;
 
-      if (cleanSku) {
-        cleanSku = cleanSku.charAt(0).toUpperCase() + cleanSku.slice(1);
+    messageText = `<b>${levelText} SmartHUB Shipping Alert</b>\n`;
+    messageText += `Pending Lists: <b>${orders.length}</b>\n\n`;
+
+    // Group orders by fulfillment channel/type
+    const groups = {};
+    orders.forEach(o => {
+      const channelName = getBeautifulChannelName(o);
+      if (!groups[channelName]) {
+        groups[channelName] = [];
       }
-      
-      const shipTimeStr = formatShipTime(o.createdTime);
-      const timeLabel = isMissed ? 'SLA' : 'Ship by';
-      
-      messageText += `${emoji} <b>${channelName}</b>`;
-      if (isMissed) {
-        messageText += ` ⚠️ <b>[MISSED]</b>`;
-      }
-      messageText += `\n`;
-      messageText += `  └ 📦 <i>${cleanSku}</i>\n`;
-      messageText += `  └ 🕒 ${timeLabel}: <b>${shipTimeStr}</b>\n\n`;
+      groups[channelName].push(o);
     });
-    
+
+    // Append each group's listings
+    Object.keys(groups).forEach(channel => {
+      const emoji = getChannelEmoji(channel);
+      messageText += `<b>${emoji} ${channel.toUpperCase()}</b>\n`;
+
+      groups[channel].forEach(o => {
+        const isMissed = o.status === 'missed';
+        
+        // Clean up sku string for display
+        let cleanSku = o.sku;
+        const activeListIndex = cleanSku.indexOf(', Active list ID:');
+        if (activeListIndex !== -1) {
+          cleanSku = cleanSku.substring(0, activeListIndex) + ')';
+        }
+        if (cleanSku) {
+          cleanSku = cleanSku.charAt(0).toUpperCase() + cleanSku.slice(1);
+        }
+
+        const shipTimeStr = formatShipTime(o.createdTime);
+        const timeLabel = isMissed ? 'MISSED' : `Ship by: ${shipTimeStr}`;
+        const finalTimeLabel = isMissed ? `⚠️ <b>[MISSED]</b>` : `Ship by: ${shipTimeStr}`;
+
+        messageText += `- <i>${cleanSku}</i> - ${finalTimeLabel}\n`;
+      });
+      messageText += `\n`;
+    });
+
     messageText = messageText.trim();
-    messageText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    messageText += `🔔 <i>Please take action immediately to process these orders.</i>`;
+    messageText += `\n\n<i>Please take action to process these orders.</i>`;
   }
 
   // If token is placeholder or not configured, fall back to mock logger

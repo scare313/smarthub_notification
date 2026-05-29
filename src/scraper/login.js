@@ -175,16 +175,64 @@ async function performLogin(url, username, password, headless = true) {
         await rememberCheckbox.check().catch(() => {});
       }
 
-      // Click verify / submit and wait for dashboard redirect
-      const mfaSubmit = await page.$('#auth-mfa-submit-button, input[type="submit"], button[type="submit"]');
+      // Click verify / submit button — Amazon uses #auth-signin-button on MFA pages
+      const mfaSubmitSelectors = [
+        '#auth-signin-button',
+        '#auth-mfa-submit-button',
+        '#signInSubmit',
+        'button[type="submit"]',
+        'input[type="submit"]'
+      ];
+
+      let mfaSubmit = null;
+      for (const sel of mfaSubmitSelectors) {
+        const el = await page.$(sel);
+        if (el && await el.isVisible()) {
+          mfaSubmit = el;
+          console.log(`[Login] Found MFA submit button: ${sel}`);
+          break;
+        }
+      }
+
       if (mfaSubmit) {
         console.log('[Login] Submitting OTP verification code...');
-        await Promise.all([
-          mfaSubmit.click(),
-          page.waitForURL(dashboardUrlPattern, { timeout: 20000 })
-        ]);
+        await mfaSubmit.click();
+
+        // Wait for navigation away from the MFA page (Amazon redirects through intermediate pages)
+        console.log('[Login] Waiting for post-MFA navigation...');
+        try {
+          // First, wait for the MFA page URL to change (any navigation away from /ap/mfa)
+          await page.waitForURL((url) => !url.toString().includes('/ap/mfa'), { timeout: 15000 });
+          console.log(`[Login] Navigated away from MFA page to: ${page.url()}`);
+        } catch (navErr) {
+          // Take a screenshot for debugging if we're stuck on MFA
+          const debugScreenshot = path.join(authDir, '..', '..', 'screenshots', 'mfa_debug.png');
+          try {
+            await page.screenshot({ path: debugScreenshot });
+            console.log(`[Login] MFA debug screenshot saved to: ${debugScreenshot}`);
+          } catch {}
+          
+          // Check if we're still on the MFA page (code might have been wrong)
+          const pageContent = await page.textContent('body').catch(() => '');
+          if (pageContent.includes('incorrect') || pageContent.includes('Invalid') || pageContent.includes('try again')) {
+            throw new Error('OTP code was rejected by Amazon. Please verify your OMS_2FA_SECRET key is correct.');
+          }
+          throw new Error(`Stuck on MFA page after OTP submission. Current URL: ${page.url()}`);
+        }
+
+        // Now wait for the final dashboard page to load (may go through intermediate redirects)
+        try {
+          await page.waitForURL(dashboardUrlPattern, { timeout: 30000, waitUntil: 'load' });
+        } catch {
+          // If we're not on dashboard yet, try navigating directly
+          const dashboardPath = process.env.OMS_DASHBOARD_PATH || '/pick';
+          const baseUrl = process.env.OMS_URL || 'https://smarthub.amazon.in';
+          const directUrl = `${baseUrl.replace(/\/$/, '')}${dashboardPath}`;
+          console.log(`[Login] Dashboard URL not reached automatically. Navigating directly to: ${directUrl}`);
+          await page.goto(directUrl, { waitUntil: 'load', timeout: 20000 });
+        }
       } else {
-        throw new Error('Found 2FA input but could not locate the verification submit button!');
+        throw new Error('Found 2FA input but could not locate any visible submit button on the MFA page!');
       }
     }
 
