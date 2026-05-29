@@ -84,38 +84,33 @@ docker compose up --build
 
 ---
 
-## 4. Manual Session Setup & Session Recovery
+## 4. Manual Session Setup & 2-Step Verification (2FA) Automation
 
-To safeguard your login details and satisfy Multi-Factor Authentication (OTP, CAPTCHAs, 2FA), cookies are persistently ignored by `.gitignore` and never committed. Therefore, you must initialize your session once upon first deployment, or whenever a session expires.
+To bypass Multi-Factor Authentication (OTP, 2-Step Verification) securely, this system implements two advanced mechanisms:
 
-### First-Time Setup & Manual Login
-1. Fill in your real SmartHUB portal details in `.env`:
+### Option A: Persistent Browser Context Profile (Device Authorization)
+The system stores full browser configurations (cookies, LocalStorage, IndexedDB, and browser device fingerprints) in the persistent folder: `src/storage/browser_profile`.
+When you perform your manual login:
+1. Run the manual session builder:
+   ```bash
+   npm run manual-login
+   ```
+2. A visible browser window will open. Perform your login manually, and complete any CAPTCHAs, OTPs, or 2FA checks.
+3. **CRITICAL:** Make sure you check the **"Don't ask for codes on this device"** checkbox in the browser!
+4. Once you reach the dashboard page (`/pick`), the script will automatically close and save your browser profile and authorized device token on the disk.
+5. The automated checks (`npm start`) will now reuse the exact same browser profile fingerprint, bypassing 2FA prompts entirely for months!
+
+### Option B: 100% Programmatic 2-Step Verification (TOTP Generator)
+If you want the assistant to be completely self-healing and perform automated logins even if Amazon expires your session, you can automate OTP generation:
+1. Go to your Amazon Seller Account settings under **Login & security** -> **2-Step Verification**.
+2. Click **Add new Authenticator App**.
+3. Amazon will show a QR Code. Look for the link below it that says: **"Can't scan the barcode? Click here"**.
+4. Copy the alphanumeric **Secret Key** string displayed (e.g. `JBSWY3DPEHPK3PXP`).
+5. Paste this key in your `.env` file:
    ```ini
-   OMS_URL=https://smarthub.amazon.in
-   OMS_DASHBOARD_PATH=/pick
-   OMS_DASHBOARD_URL_PATTERN=**/pick
+   OMS_2FA_SECRET=JBSWY3DPEHPK3PXP
    ```
-2. Run the headful manual session builder:
-   ```bash
-   npm run manual-login
-   ```
-3. A visible browser window will open. Complete your login details, Captchas, or OTPs.
-4. Once you land on the dashboard (`/pick`), the script will automatically capture your session cookies, save them securely to `src/storage/auth.json`, and close.
-
-### Session Expiration & Emergency Recovery
-If your portal session expires or gets logged out, the background scheduler will:
-- **Immediately detect** the logged-out screen.
-- **Deduplicate alerts** to prevent spam (notifying you once every 30 minutes).
-- **Dispatch a Critical Alarm Alert (🚨)** directly to all of your configured Telegram individual chats, attaching the visual screenshot of the login screen.
-
-**How to Recover:**
-When you receive the Telegram session alarm:
-1. Open your terminal in the repository path:
-   ```bash
-   npm run manual-login
-   ```
-2. Perform the login manually, let it save, and close.
-3. The background service (`npm start`) will automatically resume headless checks without requiring a service restart!
+6. The assistant will now automatically generate the required 6-digit verification code using the standard TOTP algorithm (zero dependencies) and complete 2FA login steps completely on its own!
 
 ---
 

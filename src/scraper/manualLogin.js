@@ -7,7 +7,7 @@ const authDir = path.join(__dirname, '..', 'storage');
 if (!fs.existsSync(authDir)) {
   fs.mkdirSync(authDir, { recursive: true });
 }
-const authPath = path.join(authDir, 'auth.json');
+const profilePath = path.join(authDir, 'browser_profile');
 
 async function startManualLogin() {
   const url = process.env.OMS_URL;
@@ -23,40 +23,42 @@ async function startManualLogin() {
   console.log('\n================================================================');
   console.log('         SMARTHUB MANUAL LOGIN SESSION INITIALIZER              ');
   console.log('================================================================');
+  console.log(`Using persistent browser profile at: ${profilePath}`);
   console.log(`Launching visible browser and navigating to: ${url}`);
-  console.log('1. Please perform your login manually in the browser window.');
-  console.log('2. Complete any CAPTCHAs, OTPs, or 2FA if required.');
-  console.log(`3. Once you reach the dashboard page (${dashboardPath}), the script`);
-  console.log('   will automatically intercept and save your session state.');
+  console.log('\n1. Please perform your login manually in the browser window.');
+  console.log('2. Complete any CAPTCHAs, OTPs, or 2-Step Verification (2FA).');
+  console.log('3. Ensure you check "Don\'t ask for codes on this device" if prompted.');
+  console.log(`4. Once you reach the dashboard page (${dashboardPath}), the script`);
+  console.log('   will automatically save the profile, device details, and close.');
   console.log('================================================================\n');
 
-  // Launch headful browser so the user can interact with the page
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  // Launch persistent context so that everything the user does (including device cookies,
+  // 2FA authorization flags, and browser fingerprints) is saved directly to disk.
+  const context = await chromium.launchPersistentContext(profilePath, {
+    headless: false,
+    viewport: { width: 1280, height: 800 }
+  });
+  const page = context.pages()[0] || await context.newPage();
 
   try {
     await page.goto(url, { waitUntil: 'load' });
 
     // Wait for the dashboard URL pattern to be matched (up to 5 minutes)
-    console.log('Waiting for you to log in manually...');
+    console.log('Waiting for you to log in manually in the browser window...');
     await page.waitForURL(dashboardPattern, { timeout: 300000 });
 
-    // Wait a brief moment for all session cookies/localstorage to settle
-    await page.waitForTimeout(4000);
-
-    // Save session storage state
-    await context.storageState({ path: authPath });
+    console.log('[Manual Login] Dashboard reached! Letting session data settle...');
+    await page.waitForTimeout(5000);
     
     console.log('\n================================================================');
-    console.log('SUCCESS! Session state saved successfully.');
-    console.log(`Session file path: ${authPath}`);
-    console.log('Your session is now authorized. You can close the window.');
+    console.log('SUCCESS! Session state and device flags saved successfully.');
+    console.log(`Persistent Profile Directory: ${profilePath}`);
+    console.log('Your browser is now fully authorized for future automated runs.');
     console.log('================================================================\n');
   } catch (err) {
     console.error('Error during manual login session initialization:', err.message || err);
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 

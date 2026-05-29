@@ -8,6 +8,8 @@ node_modules/
 src/storage/auth.json
 src/storage/oms_alerts.db
 src/storage/oms_alerts.db-journal
+src/storage/browser_profile/
+
 
 # Outputs & temporary folders
 screenshots/

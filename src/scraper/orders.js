@@ -1,7 +1,7 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
-const { authPath, performLogin } = require('./login');
+const { performLogin, profilePath } = require('./login');
 const { ApiInterceptor } = require('./apiClient');
 
 const screenshotsDir = path.join(__dirname, '..', '..', 'screenshots');
@@ -46,26 +46,6 @@ async function fetchOrders(useDefaultDate = false) {
   const password = process.env.OMS_PASSWORD || 'supersecurepassword';
   const headless = process.env.HEADLESS !== 'false';
 
-  // Step 1: Ensure auth session state exists, or perform initial login
-  if (!fs.existsSync(authPath)) {
-    console.log('Session storage file not found. Performing fresh login...');
-    await performLogin(url, username, password, headless);
-  }
-
-  const browser = await chromium.launch({ headless });
-  
-  // Set up context with saved auth state
-  let context;
-  try {
-    context = await browser.newContext({ storageState: authPath });
-  } catch (err) {
-    console.warn('Failed to load session storage, attempting re-login...', err);
-    await performLogin(url, username, password, headless);
-    context = await browser.newContext({ storageState: authPath });
-  }
-
-  const page = await context.newPage();
-
   const dashboardPath = process.env.OMS_DASHBOARD_PATH || '/pick';
   const safeJoinUrl = (base, pathStr) => {
     const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
@@ -74,8 +54,22 @@ async function fetchOrders(useDefaultDate = false) {
   };
   const dashboardUrl = safeJoinUrl(url, dashboardPath);
 
+  // Step 1: Ensure persistent browser profile directory exists, or perform initial login
+  if (!fs.existsSync(profilePath)) {
+    console.log('[Scraper] Browser profile directory not found. Performing fresh login...');
+    await performLogin(url, username, password, headless);
+  }
+
+  // Launch persistent context
+  console.log(`[Scraper] Launching persistent browser context at: ${profilePath}`);
+  let context = await chromium.launchPersistentContext(profilePath, {
+    headless,
+    viewport: { width: 1280, height: 800 }
+  });
+  let page = context.pages()[0] || await context.newPage();
+
   // Set up API Interception BEFORE navigating
-  const interceptor = new ApiInterceptor(page);
+  let interceptor = new ApiInterceptor(page);
 
   try {
     console.log(`Navigating to dashboard: ${dashboardUrl}`);
@@ -95,21 +89,51 @@ async function fetchOrders(useDefaultDate = false) {
     // ========================================
     // Verify Session Status (Logged-Out Detection)
     // ========================================
-    const currentUrl = page.url();
-    const isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin') || currentUrl === `${url}/` || currentUrl === url;
-    const hasPasswordInput = (await page.$('input[type="password"]')) !== null;
-    const cards = await page.$$('.awui-pick-create-card');
-    const isLoggedOut = isLoginPage || hasPasswordInput || cards.length === 0;
+    let currentUrl = page.url();
+    let isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin') || currentUrl === `${url}/` || currentUrl === url;
+    let hasPasswordInput = (await page.$('input[type="password"]')) !== null;
+    let cards = await page.$$('.awui-pick-create-card');
+    let isLoggedOut = isLoginPage || hasPasswordInput || cards.length === 0;
 
+    // If logged out, attempt automatic in-flight re-login!
     if (isLoggedOut) {
-      console.error('[Scraper] Session is logged out! Redirected to login page or picker elements completely missing.');
-      try {
-        await page.screenshot({ path: screenshotPath });
-        console.log(`Logged-out screenshot successfully captured at: ${screenshotPath}`);
-      } catch (err) {
-        console.error('Failed to capture logged-out screenshot:', err);
+      console.log('[Scraper] ⚠️ Session logged out detected! Attempting automatic in-flight re-login...');
+      
+      // Close current context first
+      await context.close();
+
+      // Perform fresh login using our automated script (handles 2FA/TOTP automatically!)
+      await performLogin(url, username, password, headless);
+
+      // Re-launch persistent context
+      console.log('[Scraper] Re-launching persistent browser context after re-login...');
+      context = await chromium.launchPersistentContext(profilePath, {
+        headless,
+        viewport: { width: 1280, height: 800 }
+      });
+      page = context.pages()[0] || await context.newPage();
+      interceptor = new ApiInterceptor(page);
+
+      console.log(`Navigating to dashboard: ${dashboardUrl}`);
+      await page.goto(dashboardUrl, { waitUntil: 'load', timeout: 20000 });
+
+      // Verify again
+      currentUrl = page.url();
+      isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin') || currentUrl === `${url}/` || currentUrl === url;
+      hasPasswordInput = (await page.$('input[type="password"]')) !== null;
+      cards = await page.$$('.awui-pick-create-card');
+      isLoggedOut = isLoginPage || hasPasswordInput || cards.length === 0;
+
+      if (isLoggedOut) {
+        console.error('[Scraper] Double check failed: Session is still logged out after re-login attempt.');
+        try {
+          await page.screenshot({ path: screenshotPath });
+          console.log(`Logged-out screenshot successfully captured at: ${screenshotPath}`);
+        } catch (err) {
+          console.error('Failed to capture logged-out screenshot:', err);
+        }
+        throw new Error('SESSION_LOGGED_OUT');
       }
-      throw new Error('SESSION_LOGGED_OUT');
     }
 
     // ========================================
@@ -121,7 +145,7 @@ async function fetchOrders(useDefaultDate = false) {
     console.error('Error fetching orders from dashboard:', err);
     throw err;
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
